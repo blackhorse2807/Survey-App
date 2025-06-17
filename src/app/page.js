@@ -1,103 +1,203 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import { fetchSurveyImages, getRandomVariantIndices, normalizeImageId, registerVote } from "../utils/api";
+import ImageSelector from "../components/ImageSelector";
+import { Toaster, toast } from "react-hot-toast";
+import useWindowSize from "@/hooks/useWindowSize";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [currentScreen, setCurrentScreen] = useState(1);
+  const [showText, setShowText] = useState(false);
+  const [imageId, setImageId] = useState(0);
+  const [idx1, setIdx1] = useState(Math.floor(Math.random() * 5));
+  const [idx2, setIdx2] = useState(Math.floor(Math.random() * 5));
+  const [originalImage, setOriginalImage] = useState("/images/face.png");
+  const [variantImages, setVariantImages] = useState(["/images/face.png", "/images/face.png"]);
+  const [loading, setLoading] = useState(false);
+  const [votingHistory, setVotingHistory] = useState([]);
+  const [ticketId, setTicketId] = useState(null);
+  const windowSize = useWindowSize();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    // Show first screen with no text
+    setTimeout(() => {
+      // Show text after 1 second
+      setShowText(true);
+      
+      // Move to screen 3 after 3 seconds
+      setTimeout(() => {
+        setCurrentScreen(3);
+        fetchImages();
+      }, 3000);
+    }, 1000);
+  }, []);
+
+  const fetchImages = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchSurveyImages(imageId, idx1, idx2);
+      
+      // Set the ticket ID from the response
+      if (data.ticketId) {
+        setTicketId(data.ticketId);
+      }
+      
+      // Set the original image from the response
+      if (data.originalImage) {
+        setOriginalImage(data.originalImage);
+        console.log("Original image received, length:", 
+          typeof data.originalImage === 'string' ? data.originalImage.substring(0, 20) + '...' : 'not a string');
+      }
+      
+      // Set the variant images from the response
+      if (data.variantImages && Array.isArray(data.variantImages) && 
+          data.variantImages.length === 2) {
+        setVariantImages(data.variantImages);
+        console.log("Variant images received:", 
+          data.variantImages.map(img => typeof img === 'string' ? img.substring(0, 20) + '...' : 'not a string'));
+      }
+      
+      console.log(`Fetched images with image_id: ${imageId}, idx1: ${idx1}, idx2: ${idx2}, ticket: ${data.ticketId}`);
+    } catch (error) {
+      console.error("Error fetching images:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNextImage = () => {
+    setImageId((prevId) => {
+      const newId = prevId + 1;
+      return normalizeImageId(newId);
+    });
+    fetchImages();
+  };
+
+  const handlePrevImage = () => {
+    setImageId((prevId) => {
+      const newId = prevId - 1;
+      return normalizeImageId(newId);
+    });
+    fetchImages();
+  };
+
+  // Function to increment a specific variant index
+  const handleIncrementVariant = (variantIndex) => {
+    setLoading(true);
+    
+    if (variantIndex === 0) {
+      // Increment idx1 (0-4)
+      setIdx1(prevIdx => {
+        const newIdx = prevIdx + 1;
+        return newIdx > 4 ? 0 : newIdx;
+      });
+    } else {
+      // Increment idx2 (0-4)
+      setIdx2(prevIdx => {
+        const newIdx = prevIdx + 1;
+        return newIdx > 4 ? 0 : newIdx;
+      });
+    }
+    
+    // Wait a bit before fetching to ensure state is updated
+    setTimeout(() => {
+      fetchImages();
+    }, 100);
+  };
+
+  const handleSubmitVote = async (selectedVariant) => {
+    try {
+      setLoading(true);
+      // Map the selected variant (0 or 1) to the actual variant index (idx1 or idx2)
+      const voteValue = selectedVariant === 0 ? idx1 : idx2;
+      
+      console.log(`Submitting vote for ticket ${ticketId}, variant ${voteValue}`);
+      const response = await registerVote(ticketId, voteValue);
+      
+      // Record the vote in history
+      setVotingHistory(prev => [
+        ...prev, 
+        { ticketId, imageId, selectedVariant: voteValue }
+      ]);
+      
+      toast.success("Vote submitted successfully!");
+      
+      // Move to the next image
+      handleNextImage();
+    } catch (error) {
+      console.error("Error submitting vote:", error);
+      toast.error("Failed to submit vote. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="flex min-h-screen flex-col items-center justify-between p-4 md:p-24 bg-gradient-to-b from-blue-400 to-blue-600">
+      <Toaster position="top-center" />
+      
+      {/* Screen 1 - Empty gradient background */}
+      <div className="screen screen-1" style={{ 
+        opacity: currentScreen === 1 ? 1 : 0,
+        zIndex: currentScreen === 1 ? 2 : 0,
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+      }}>
+        <div className="text-center" style={{
+          opacity: showText ? 1 : 0,
+          transform: showText ? 'translateY(0)' : 'translateY(20px)',
+          transition: 'opacity 0.5s ease, transform 0.5s ease',
+          fontSize: windowSize.width < 768 ? "24px" : "50px",
+          fontFamily: "var(--gotham-light)",
+          fontWeight: "500",
+          color: "white",
+          textShadow: "0 2px 4px rgba(0,0,0,0.3)"
+        }}>
+          Select Your Image!!
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+      </div>
+
+      {/* Screen 3 - Image selection screen */}
+      <div className="screen screen-3" style={{ 
+        opacity: currentScreen === 3 ? 1 : 0,
+        zIndex: currentScreen === 3 ? 2 : 0,
+        padding: windowSize.width < 768 ? "10px 5px" : "10px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        overflowY: "auto",
+        width: "100%",
+        height: "100%",
+        boxSizing: "border-box"
+      }}>
+        <div style={{ 
+          width: "100%", 
+          maxWidth: "800px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center"
+        }}>
+          <ImageSelector 
+            originalImage={originalImage}
+            variantImages={variantImages}
+            imageId={imageId}
+            idx1={idx1}
+            idx2={idx2}
+            loading={loading}
+            onChangeImageId={handleNextImage}
+            onIncrementVariant={handleIncrementVariant}
+            onSubmit={handleSubmitVote}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+        </div>
+      </div>
+    </main>
   );
 }
