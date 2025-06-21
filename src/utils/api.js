@@ -5,6 +5,43 @@
 const API_URL = "https://tools.qrplus.ai/api/v1/survey/getTicket";
 const VOTE_API_URL = "https://tools.qrplus.ai/api/v1/survey/registerVote";
 const DEFAULT_IMAGE = "/images/face.png";
+const USER_ID_KEY = "survey_app_user_id";
+
+/**
+ * Generates or retrieves a unique user ID
+ * @returns {string} - The user ID
+ */
+export function getUserId() {
+  // Check if we're in a browser environment
+  if (typeof window === 'undefined') {
+    return 'server-side';
+  }
+  
+  // Try to get existing user ID from localStorage
+  let userId = localStorage.getItem(USER_ID_KEY);
+  
+  // If no user ID exists, generate a new one
+  if (!userId) {
+    userId = generateUniqueId();
+    localStorage.setItem(USER_ID_KEY, userId);
+    console.log(`New user ID generated: ${userId}`);
+  } else {
+    console.log(`Existing user ID found: ${userId}`);
+  }
+  
+  return userId;
+}
+
+/**
+ * Generates a unique ID
+ * @returns {string} - A unique ID
+ */
+function generateUniqueId() {
+  // Generate a random string + timestamp for uniqueness
+  const timestamp = new Date().getTime().toString(36);
+  const randomStr = Math.random().toString(36).substring(2, 10);
+  return `${timestamp}-${randomStr}`;
+}
 
 /**
  * Fetches images from the API based on the provided parameters
@@ -15,6 +52,9 @@ const DEFAULT_IMAGE = "/images/face.png";
  */
 export async function fetchSurveyImages(imageId, idx1, idx2) {
   try {
+    const userId = getUserId();
+    console.log(`Fetching images for user: ${userId}`);
+    
     const response = await fetch(API_URL, {
       method: "POST",
       headers: {
@@ -24,6 +64,7 @@ export async function fetchSurveyImages(imageId, idx1, idx2) {
         image_id: imageId.toString(),
         idx1: idx1.toString(),
         idx2: idx2.toString(),
+        user_id: userId // Include user ID in the request
       }),
     });
 
@@ -120,6 +161,9 @@ export function normalizeImageId(id) {
  */
 export async function registerVote(ticketId, vote) {
   try {
+    const userId = getUserId();
+    console.log(`Registering vote for user: ${userId}`);
+    
     const response = await fetch(VOTE_API_URL, {
       method: "POST",
       headers: {
@@ -128,6 +172,7 @@ export async function registerVote(ticketId, vote) {
       body: JSON.stringify({
         ticket_id: ticketId,
         vote: vote.toString(),
+        user_id: userId // Include user ID in the request
       }),
     });
 

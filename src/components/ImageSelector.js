@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import useWindowSize from "../hooks/useWindowSize";
 
@@ -14,8 +14,7 @@ import useWindowSize from "../hooks/useWindowSize";
  * @param {number} props.idx1 - First variant index (0-4)
  * @param {number} props.idx2 - Second variant index (0-4)
  * @param {boolean} props.loading - Loading state
- * @param {Function} props.onChangeImageId - Function to call when changing image ID
- * @param {Function} props.onIncrementVariant - Function to call when incrementing a specific variant
+ * @param {Function} props.onChangeVariants - Function to call when changing variants
  * @param {Function} props.onSubmit - Function to call when submitting selection
  */
 export default function ImageSelector({
@@ -25,17 +24,41 @@ export default function ImageSelector({
   idx1,
   idx2,
   loading,
-  onChangeImageId,
-  onIncrementVariant,
+  onChangeVariants,
   onSubmit
 }) {
   const [selectedVariant, setSelectedVariant] = useState(null);
+  const [timer, setTimer] = useState(5);
   const defaultImage = "/images/face.png";
   const { width } = useWindowSize();
   const isMobile = width ? width < 768 : false;
 
+  // Reset timer when variants change
+  useEffect(() => {
+    setTimer(5);
+    
+    // Don't reset selection when loading changes, only when variants change
+    if (idx1 !== undefined && idx2 !== undefined) {
+      setSelectedVariant(null);
+    }
+    
+    const interval = setInterval(() => {
+      setTimer(prevTimer => {
+        // If timer reaches 0 and no variant is selected, change variants
+        if (prevTimer <= 1 && selectedVariant === null && !loading) {
+          onChangeVariants();
+          return 5;
+        }
+        return prevTimer - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [idx1, idx2, onChangeVariants]); // Remove loading and selectedVariant from dependencies
+
   const handleVariantClick = (index) => {
     setSelectedVariant(index);
+    setTimer(5); // Reset timer when a selection is made
   };
 
   const handleSubmit = () => {
@@ -139,64 +162,12 @@ export default function ImageSelector({
               )}
               
               {renderImage(originalImage, "Original face", isMobile ? 260 : 300, isMobile ? 180 : 300)}
-              
-              {/* Navigation arrows inside the image */}
-              <div style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "0 10px"
-              }}>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onChangeImageId(false);
-                  }} 
-                  className="navigation-button"
-                  disabled={loading}
-                  style={{
-                    backgroundColor: "rgba(255, 255, 255, 0.7)",
-                    borderRadius: "50%",
-                    width: "30px",
-                    height: "30px",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center"
-                  }}
-                >
-                  ←
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onChangeImageId(true);
-                  }} 
-                  className="navigation-button"
-                  disabled={loading}
-                  style={{
-                    backgroundColor: "rgba(255, 255, 255, 0.7)",
-                    borderRadius: "50%",
-                    width: "30px",
-                    height: "30px",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center"
-                  }}
-                >
-                  →
-                </button>
-              </div>
             </div>
           </div>
         </div>
       </div>
       
-      {/* Instruction Text */}
+      {/* Instruction Text with Timer */}
       <div className="instruction-text" style={{
         textAlign: "center",
         color: "white",
@@ -208,6 +179,16 @@ export default function ImageSelector({
         padding: "0 10px"
       }}>
         Choose from the following images which closely matches the original image:
+        {selectedVariant === null && (
+          <div style={{
+            marginTop: "5px",
+            fontSize: isMobile ? "12px" : "14px",
+            color: timer <= 2 ? "#FFD700" : "white",
+            fontWeight: timer <= 2 ? "bold" : "normal"
+          }}>
+            New variants in: {timer}s
+          </div>
+        )}
       </div>
       
       {/* Variant Images */}
@@ -266,28 +247,6 @@ export default function ImageSelector({
                   Variant {index === 0 ? idx1 : idx2}
                 </div>
               </div>
-              
-              {/* Individual variant increment button */}
-              <button
-                onClick={() => onIncrementVariant(index)}
-                disabled={loading}
-                style={{
-                  marginTop: "8px",
-                  backgroundColor: "#3498db",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "4px",
-                  padding: "5px 10px",
-                  fontSize: isMobile ? "12px" : "14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <span style={{ marginRight: "4px" }}>↻</span>
-                Change Variant {index === 0 ? idx1 : idx2}
-              </button>
             </div>
           ))
         ) : (
@@ -337,24 +296,6 @@ export default function ImageSelector({
                   Variant {index === 0 ? idx1 : idx2}
                 </div>
               </div>
-              
-              {/* Individual variant increment button */}
-              <button
-                onClick={() => onIncrementVariant(index)}
-                disabled={loading}
-                style={{
-                  marginTop: "8px",
-                  backgroundColor: "var(--button-gradient)",
-                  fontSize: isMobile ? "12px" : "14px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <span style={{ marginRight: "4px" }}>↻</span>
-                Change Variant {index === 0 ? idx1 : idx2}
-              </button>
             </div>
           ))
         )}
