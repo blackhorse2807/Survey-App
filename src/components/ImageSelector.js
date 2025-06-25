@@ -33,18 +33,20 @@ export default function ImageSelector({
   const { width } = useWindowSize();
   const isMobile = width ? width < 768 : false;
 
-  // Reset timer when variants change
+  // Reset timer when variants change or loading status changes
   useEffect(() => {
     setTimer(5);
     
-    // Don't reset selection when loading changes, only when variants change
+    // Reset selection only when variants actually change
     if (idx1 !== undefined && idx2 !== undefined) {
       setSelectedVariant(null);
     }
     
+    // If currently loading, do not start timer
+    if (loading) return;
+    
     const interval = setInterval(() => {
       setTimer(prevTimer => {
-        // If timer reaches 0 and no variant is selected, change variants
         if (prevTimer <= 1 && selectedVariant === null && !loading) {
           onChangeVariants();
           return 5;
@@ -54,7 +56,7 @@ export default function ImageSelector({
     }, 1000);
     
     return () => clearInterval(interval);
-  }, [idx1, idx2, onChangeVariants]); // Remove loading and selectedVariant from dependencies
+  }, [idx1, idx2, loading, onChangeVariants]);
 
   const handleVariantClick = (index) => {
     setSelectedVariant(index);
@@ -78,15 +80,24 @@ export default function ImageSelector({
         // If it's already a complete data URL
         if (src.startsWith('data:image')) {
           imageSrc = src;
+          console.log("Rendering image with data URL prefix");
         }
         // If it's a base64 string without prefix (from API)
         else if (src.length > 100) {
           imageSrc = `data:image/png;base64,${src}`;
+          console.log("Rendering base64 image, added prefix");
         }
         // If it's a local path or URL
         else if (src.startsWith('/') || src.startsWith('http')) {
           imageSrc = src;
+          console.log("Rendering image with path:", src.substring(0, 20) + '...');
+        } else {
+          console.log("Using default image - unknown format:", src.substring(0, 20) + '...');
         }
+      } else if (!src) {
+        console.log("Source is null or undefined, using default");
+      } else {
+        console.log("Non-string source type:", typeof src);
       }
       
       return (
@@ -96,6 +107,7 @@ export default function ImageSelector({
           width={width} 
           height={height}
           style={{ objectFit: "cover" }}
+          priority={true} // Add priority to load images faster
         />
       );
     } catch (error) {

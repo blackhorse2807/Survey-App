@@ -4,67 +4,30 @@
 
 const API_URL = "https://tools.qrplus.ai/api/v1/survey/getTicket";
 const VOTE_API_URL = "https://tools.qrplus.ai/api/v1/survey/registerVote";
+const REGISTER_VOTER_URL = "https://tools.qrplus.ai/api/v1/survey/registerVoter";
+const VOTE_PARAMS_URL = "https://tools.qrplus.ai/api/v1/survey/voteParams";
 const DEFAULT_IMAGE = "/images/face.png";
-const USER_ID_KEY = "survey_app_user_id";
 
 /**
- * Generates or retrieves a unique user ID
- * @returns {string} - The user ID
+ * Registers a voter to start the survey
+ * @param {string} voter_name - Name of the voter
+ * @param {string} start_idx - Starting image index
+ * @param {string} end_idx - Ending image index
+ * @returns {Promise<Object>} - The API response with voter details
  */
-export function getUserId() {
-  // Check if we're in a browser environment
-  if (typeof window === 'undefined') {
-    return 'server-side';
-  }
-  
-  // Try to get existing user ID from localStorage
-  let userId = localStorage.getItem(USER_ID_KEY);
-  
-  // If no user ID exists, generate a new one
-  if (!userId) {
-    userId = generateUniqueId();
-    localStorage.setItem(USER_ID_KEY, userId);
-    console.log(`New user ID generated: ${userId}`);
-  } else {
-    console.log(`Existing user ID found: ${userId}`);
-  }
-  
-  return userId;
-}
-
-/**
- * Generates a unique ID
- * @returns {string} - A unique ID
- */
-function generateUniqueId() {
-  // Generate a random string + timestamp for uniqueness
-  const timestamp = new Date().getTime().toString(36);
-  const randomStr = Math.random().toString(36).substring(2, 10);
-  return `${timestamp}-${randomStr}`;
-}
-
-/**
- * Fetches images from the API based on the provided parameters
- * @param {number} imageId - The ID of the image (0-99)
- * @param {number} idx1 - The first variant index (0-4)
- * @param {number} idx2 - The second variant index (0-4)
- * @returns {Promise<Object>} - The API response with ticket ID and images
- */
-export async function fetchSurveyImages(imageId, idx1, idx2) {
+export async function registerVoter(voter_name, start_idx, end_idx) {
   try {
-    const userId = getUserId();
-    console.log(`Fetching images for user: ${userId}`);
+    console.log(`Registering voter: ${voter_name}, range: ${start_idx}-${end_idx}`);
     
-    const response = await fetch(API_URL, {
+    const response = await fetch(REGISTER_VOTER_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        image_id: imageId.toString(),
-        idx1: idx1.toString(),
-        idx2: idx2.toString(),
-        user_id: userId // Include user ID in the request
+        "voter_name": voter_name,
+        "start_idx": start_idx,
+        "end_idx": end_idx
       }),
     });
 
@@ -73,38 +36,72 @@ export async function fetchSurveyImages(imageId, idx1, idx2) {
     }
 
     const data = await response.json();
+    // console.log("Voter registered successfully:", data);
+    return data;
+  } catch (error) {
+    console.error("Error registering voter:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetches images from the API based on the provided parameters
+ * @param {number} imageId - The ID of the image (must be between start_idx and end_idx-1)
+ * @param {number} idx1 - The first variant index (between 0 and n_variants-1)
+ * @param {number} idx2 - The second variant index (between 0 and n_variants-1)
+ * @param {number|string} voter_id - The voter ID returned from registerVoter
+ * @returns {Promise<Object>} - The API response with ticket ID and images
+ */
+export async function fetchSurveyImages(imageId, idx1, idx2, voter_id) {
+  try {
+    console.log(`Fetching images for voter: ${voter_id}`);
+    
+    // Make sure voter_id is a string for the API request
+    const voterIdStr = String(voter_id);
+    
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        image_id: imageId.toString(),
+        voter_id: voterIdStr,
+        idx1: idx1.toString(),
+        idx2: idx2.toString()
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Raw API response:", JSON.stringify(data).substring(0, 200) + "...");
     
     try {
-      // Process the API response
-      let ticketId = null;
-      let originalImage = DEFAULT_IMAGE;
-      let variantImages = [DEFAULT_IMAGE, DEFAULT_IMAGE];
+      // Process the API response based on the documented structure
+      const ticketId = data.ticket_id || null;
+      const originalImage = data.image || DEFAULT_IMAGE;
+      const variantImages = [
+        data.qr1 || DEFAULT_IMAGE,
+        data.qr2 || DEFAULT_IMAGE
+      ];
       
-      // Extract ticket ID
-      if (data && typeof data === 'object' && data.ticket) {
-        ticketId = String(data.ticket);
-        
-        // Extract original image
-        if (data.image) {
-          originalImage = data.image;
-        }
-        
-        // Extract variant images
-        if (data.qr1 && data.qr2) {
-          variantImages = [data.qr1, data.qr2];
-        }
-      } else if (typeof data === 'string') {
-        // If data is just a string (ticket ID)
-        ticketId = data;
-      }
+      console.log("Processed getTicket response:", { 
+        ticketId,
+        voter_id: data.voter_id,
+        hasOriginalImage: !!originalImage,
+        hasVariant1: !!data.qr1,
+        hasVariant2: !!data.qr2
+      });
       
-      console.log("API response processed:", { ticketId, hasOriginalImage: !!originalImage, hasVariantImages: variantImages.length === 2 });
       return { ticketId, originalImage, variantImages };
       
     } catch (error) {
       console.error("Error processing API response:", error);
       return { 
-        ticketId: `ticket-${imageId}-${idx1}-${idx2}`,
+        ticketId: null,
         originalImage: DEFAULT_IMAGE,
         variantImages: [DEFAULT_IMAGE, DEFAULT_IMAGE]
       };
@@ -116,19 +113,7 @@ export async function fetchSurveyImages(imageId, idx1, idx2) {
 }
 
 /**
- * Generates a URL for the original image
- * @param {number} imageId - The ID of the image (0-99)
- * @returns {string} - The URL of the original image
- */
-
-/**
- * Generates a URL for a variant image
- * @param {number} imageId - The ID of the image (0-99)
- * @param {number} variantIdx - The variant index (0-4)
- * @returns {string} - The URL of the variant image
-
-/**
- * Generates a random index pair for variants
+ * Generates random indices for variants
  * @returns {Array<number>} - Array containing two different random indices between 0 and 4
  */
 export function getRandomVariantIndices() {
@@ -156,13 +141,13 @@ export function normalizeImageId(id) {
 /**
  * Registers a user's vote with the API
  * @param {string} ticketId - The ticket ID from the getTicket API call
- * @param {number} vote - The variant index the user voted for (0-4)
+ * @param {number} vote - The variant index the user voted for (between 0 and n_variants-1)
+ * @param {number|string} voter_id - The voter ID returned from registerVoter
  * @returns {Promise<Object>} - The API response
  */
-export async function registerVote(ticketId, vote) {
+export async function registerVote(ticketId, vote, voter_id) {
   try {
-    const userId = getUserId();
-    console.log(`Registering vote for user: ${userId}`);
+    console.log(`Registering vote for voter: ${voter_id}, ticket: ${ticketId}, vote: ${vote}`);
     
     const response = await fetch(VOTE_API_URL, {
       method: "POST",
@@ -172,7 +157,7 @@ export async function registerVote(ticketId, vote) {
       body: JSON.stringify({
         ticket_id: ticketId,
         vote: vote.toString(),
-        user_id: userId // Include user ID in the request
+        voter_id: String(voter_id)
       }),
     });
 
@@ -181,9 +166,46 @@ export async function registerVote(ticketId, vote) {
     }
 
     const data = await response.json();
+    console.log("Vote registered successfully:", data);
     return data;
   } catch (error) {
     console.error("Error registering vote:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetches vote parameters for a specific voter
+ * @param {number|string} voterId - The voter ID returned from registerVoter
+ * @returns {Promise<Object>} - The API response with voter parameters
+ */
+export async function fetchVoteParams(voterId) {
+  try {
+    console.log(`Fetching vote parameters for voter: ${voterId}`);
+    
+    const response = await fetch(`${VOTE_PARAMS_URL}/${voterId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log("Vote parameters received:", data);
+    
+    return {
+      voter_name: data.voter_name,
+      n_variants: data.n_variants,
+      start_idx: data.start_idx,
+      end_idx: data.end_idx
+    };
+    
+  } catch (error) {
+    console.error("Error fetching vote parameters:", error);
     throw error;
   }
 } 

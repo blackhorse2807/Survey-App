@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { fetchSurveyImages, getRandomVariantIndices, normalizeImageId, registerVote, getUserId } from "../utils/api";
+import { fetchSurveyImages, getRandomVariantIndices, normalizeImageId, registerVote, registerVoter, fetchVoteParams } from "../utils/api";
 import ImageSelector from "../components/ImageSelector";
 import { Toaster, toast } from "react-hot-toast";
 import useWindowSize from "@/hooks/useWindowSize";
@@ -19,28 +19,37 @@ export default function Home() {
   const [votingHistory, setVotingHistory] = useState([]);
   const [ticketId, setTicketId] = useState(null);
   const [shownPairs, setShownPairs] = useState(new Set());
-  const [userId, setUserId] = useState(null);
+  // Voter data state
+  const [voterData, setVoterData] = useState(null);
+  const [voterId, setVoterId] = useState(null);
+  const [maxImages, setMaxImages] = useState(100);
+  const [nVariants, setNVariants] = useState(5);
+  const [startIdx, setStartIdx] = useState(Math.floor(Math.random() * 20));
+  const [endIdx, setEndIdx] = useState(Math.floor(Math.random() * 70) + 10);
+  // Flag to indicate if initial images have loaded
+  const [initialImagesLoaded, setInitialImagesLoaded] = useState(false);
   const windowSize = useWindowSize();
   
-  // Total possible pairs for each image (combinations of 5 choose 2)
-  const TOTAL_POSSIBLE_PAIRS = 10;
+  // Total possible pairs for each image (combinations of n_variants choose 2)
+  const [totalPossiblePairs, setTotalPossiblePairs] = useState(10);
 
   useEffect(() => {
-    // Initialize user ID
-    const id = getUserId();
-    setUserId(id);
-    console.log("User ID initialized:", id);
-    
+    // Set total possible pairs based on n_variants
+    // Formula for combinations: n! / (r! * (n-r)!) where n is n_variants and r is 2
+    if (nVariants && nVariants > 1) {
+      const possiblePairs = nVariants * (nVariants - 1) / 2;
+      setTotalPossiblePairs(possiblePairs);
+    }
+  }, [nVariants]);
+
+  useEffect(() => {
     // Show first screen with no text
     setTimeout(() => {
       // Show text after 1 second
       setShowText(true);
       
-      // Move to screen 3 after 3 seconds
-      setTimeout(() => {
-        setCurrentScreen(3);
-        fetchImages();
-      }, 3000);
+      // Register voter
+      handleRegisterVoter();
     }, 1000);
   }, []);
 
@@ -49,62 +58,157 @@ export default function Home() {
     setShownPairs(new Set());
   }, [imageId]);
 
-  const fetchImages = async () => {
-    setLoading(true);
+  // Select a valid image ID within the range
+  const getValidImageId = () => {
+    // Start with current imageId
+    let validId = imageId;
+    
+    // Check if startIdx and endIdx are valid numbers
+    const startIndex = parseInt(startIdx);
+    const endIndex = parseInt(endIdx);
+    
+    if (!isNaN(startIndex) && !isNaN(endIndex) && endIndex > startIndex) {
+      // If current imageId is outside the valid range, choose a random one in range
+      if (validId < startIndex || validId >= endIndex) {
+        validId = startIndex + Math.floor(Math.random() * (endIndex - startIndex));
+      }
+    }
+    
+    return validId;
+  };
+
+  // Get random variant indices based on n_variants
+  const getRandomVariantPair = () => {
+    const max = nVariants ? nVariants - 1 : 4; // Default to 0-4 if nVariants not set
+    
+    let index1 = Math.floor(Math.random() * (max + 1)); // 0 to max inclusive
+    let index2;
+    
+    // Ensure index2 is different from index1
+    do {
+      index2 = Math.floor(Math.random() * (max + 1));
+    } while (index1 === index2);
+    
+    return [index1, index2];
+  };
+
+  // Helper to call API and update image states in one place
+  const fetchAndUpdate = async (imgId, varIdx1, varIdx2, vid) => {
     try {
-      const data = await fetchSurveyImages(imageId, idx1, idx2);
-      
-      // Set the ticket ID from the response
-      if (data.ticketId) {
-        setTicketId(data.ticketId);
-      }
-      
-      // Set the original image from the response
-      if (data.originalImage) {
-        setOriginalImage(data.originalImage);
-        console.log("Original image received, length:", 
-          typeof data.originalImage === 'string' ? data.originalImage.substring(0, 20) + '...' : 'not a string');
-      }
-      
-      // Set the variant images from the response
-      if (data.variantImages && Array.isArray(data.variantImages) && 
-          data.variantImages.length === 2) {
+      const data = await fetchSurveyImages(imgId, varIdx1, varIdx2, vid);
+
+      // Update ticket id
+      if (data.ticketId) setTicketId(data.ticketId);
+
+      // Update images
+      if (data.originalImage) setOriginalImage(data.originalImage);
+      if (data.variantImages && Array.isArray(data.variantImages) && data.variantImages.length === 2) {
         setVariantImages(data.variantImages);
-        console.log("Variant images received:", 
-          data.variantImages.map(img => typeof img === 'string' ? img.substring(0, 20) + '...' : 'not a string'));
       }
-      
-      console.log(`Fetched images with image_id: ${imageId}, idx1: ${idx1}, idx2: ${idx2}, ticket: ${data.ticketId}`);
-      
-      // Add this pair to the shown pairs set
-      const pairKey = [idx1, idx2].sort().join('-');
+
+      // Add pair to shown set
+      const pairKey = [varIdx1, varIdx2].sort().join('-');
       setShownPairs(prev => {
-        const newSet = new Set(prev);
-        newSet.add(pairKey);
-        console.log(`Added pair ${pairKey} to shown pairs. Total: ${newSet.size}/${TOTAL_POSSIBLE_PAIRS}`);
-        return newSet;
+        const ns = new Set(prev);
+        ns.add(pairKey);
+        return ns;
       });
-      
-    } catch (error) {
-      console.error("Error fetching images:", error);
-      toast.error("Failed to fetch images. Please try again.");
+    } catch (err) {
+      console.error('Error in fetchAndUpdate', err);
+      toast.error('Failed to fetch images. Please try again.');
+    }
+  };
+
+  // Register voter function
+  const handleRegisterVoter = async () => {
+    try {
+      setLoading(true);
+      const voterName = "Survey User";
+      const data = await registerVoter(voterName, startIdx, endIdx);
+
+      let extractedVoterId = data.voter_id ?? data.voterId ?? data.id;
+      if (!extractedVoterId) {
+        toast.error("Registration issue: No voter ID received");
+        return;
+      }
+      setVoterId(extractedVoterId);
+
+      // Fetch vote params
+      try {
+        const params = await fetchVoteParams(extractedVoterId);
+        setVoterData({ ...data, ...params });
+        setNVariants(params.n_variants);
+        setStartIdx(params.start_idx.toString());
+        setEndIdx(params.end_idx.toString());
+      } catch (e) {
+        console.warn('Could not fetch vote params', e);
+      }
+
+      // Prepare first ticket parameters
+      const validImg = getValidImageId();
+      const [newIdx1, newIdx2] = getRandomVariantPair();
+      // Update index states early so UI labels match
+      setIdx1(newIdx1);
+      setIdx2(newIdx2);
+      setImageId(validImg);
+
+      // Switch to main screen
+      setCurrentScreen(3);
+
+      // Fetch and display images once
+      await fetchAndUpdate(validImg, newIdx1, newIdx2, extractedVoterId);
+      setInitialImagesLoaded(true);
+    } catch (err) {
+      console.error('Error registering voter', err);
+      toast.error('Failed to register. Please refresh the page.');
     } finally {
       setLoading(false);
     }
   };
 
+  // Replace body of fetchImagesWithVoterId to call helper
+  const fetchImagesWithVoterId = async (vid) => {
+    setLoading(true);
+    const imgId = getValidImageId();
+    const pair = [idx1, idx2];
+    await fetchAndUpdate(imgId, pair[0], pair[1], vid);
+    setLoading(false);
+  };
+
+  // Update fetchImages to use helper too
+  const fetchImages = async () => {
+    if (!voterId) {
+      toast.error('Please wait while registering...');
+      return;
+    }
+    setLoading(true);
+    const imgId = getValidImageId();
+    await fetchAndUpdate(imgId, idx1, idx2, voterId);
+    setLoading(false);
+  };
+
   // Function to change to the next original image
   const moveToNextOriginalImage = () => {
-    setImageId((prevId) => {
-      const newId = prevId + 1;
-      return normalizeImageId(newId);
-    });
+    const currentId = parseInt(imageId);
+    const start = parseInt(startIdx) || 0;
+    const end = parseInt(endIdx) || 100;
+    
+    let newId;
+    // If current ID is valid, move to next
+    if (!isNaN(currentId) && currentId >= start && currentId < end - 1) {
+      newId = currentId + 1;
+    } else {
+      // Otherwise start at the beginning
+      newId = start;
+    }
+    
+    setImageId(newId);
     
     // Reset shown pairs for the new image
     setShownPairs(new Set());
     
-    // Get new random variants for the new image
-    const [newIdx1, newIdx2] = getRandomVariantIndices();
+    // Get new random variants based on n_variants
+    const [newIdx1, newIdx2] = getRandomVariantPair();
     setIdx1(newIdx1);
     setIdx2(newIdx2);
     
@@ -115,11 +219,13 @@ export default function Home() {
   // Function to get a new random pair that hasn't been shown yet
   const getNewRandomPair = () => {
     // If we've shown all possible pairs, move to next original image
-    if (shownPairs.size >= TOTAL_POSSIBLE_PAIRS) {
-      console.log("All pairs shown, moving to next original image");
+    if (shownPairs.size >= totalPossiblePairs) {
+      console.log(`All pairs shown (${shownPairs.size}/${totalPossiblePairs}), moving to next original image`);
       moveToNextOriginalImage();
       return;
     }
+    
+    const max = nVariants ? nVariants - 1 : 4; // Default to 0-4 if nVariants not set
     
     // Try to find a pair that hasn't been shown yet
     let attempts = 0;
@@ -127,9 +233,9 @@ export default function Home() {
     let foundNewPair = false;
     
     do {
-      // Get random indices
-      newIdx1 = Math.floor(Math.random() * 5);
-      newIdx2 = Math.floor(Math.random() * 5);
+      // Get random indices based on n_variants
+      newIdx1 = Math.floor(Math.random() * (max + 1));
+      newIdx2 = Math.floor(Math.random() * (max + 1));
       
       // Make sure they're different
       if (newIdx1 === newIdx2) {
@@ -173,18 +279,23 @@ export default function Home() {
       return;
     }
     
+    if (!voterId) {
+      toast.error("Cannot submit vote - voter not registered");
+      return;
+    }
+    
     try {
       setLoading(true);
       // Map the selected variant (0 or 1) to the actual variant index (idx1 or idx2)
       const voteValue = selectedVariant === 0 ? idx1 : idx2;
       
-      console.log(`Submitting vote for ticket ${ticketId}, variant ${voteValue}, user ${userId}`);
-      const response = await registerVote(ticketId, voteValue);
+      console.log(`Submitting vote for ticket ${ticketId}, variant ${voteValue}, voter ${voterId}`);
+      const response = await registerVote(ticketId, voteValue, voterId);
       
       // Record the vote in history
       setVotingHistory(prev => [
         ...prev, 
-        { ticketId, imageId, selectedVariant: voteValue, userId }
+        { ticketId, imageId, selectedVariant: voteValue, voterId }
       ]);
       
       toast.success("Vote submitted successfully!");
@@ -270,8 +381,9 @@ export default function Home() {
             color: "rgba(255,255,255,0.7)",
             textAlign: "center"
           }}>
-            {/* <div>Shown pairs: {shownPairs.size}/{TOTAL_POSSIBLE_PAIRS}</div> */}
-            {/* <div style={{ marginTop: "5px" }}>User ID: {userId ? userId.substring(0, 8) + '...' : 'Loading...'}</div> */}
+            {/* <div>Shown pairs: {shownPairs.size}/{totalPossiblePairs}</div> */}
+            {/* <div style={{ marginTop: "5px" }}>Voter ID: {voterId ? voterId : 'Registering...'}</div> */}
+            {/* <div style={{ marginTop: "5px" }}>Image range: {startIdx} - {endIdx}</div> */}
           </div>
         </div>
       </div>
